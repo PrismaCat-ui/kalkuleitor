@@ -25,29 +25,55 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.kalkuleitor.ui.theme.KalkuleitorTheme
 
-private val operators = setOf("+", "−", "×", "÷")
+/** Режим калькулятора: обычный набор кнопок или инженерный с функциями. */
+enum class CalculatorMode(val title: String) {
+    NORMAL("Обычный"),
+    ENGINEERING("Инженерный"),
+}
 
-private val buttonRows = listOf(
-    listOf("sin", "cos", "tan" , "C"),
-    listOf("√", "x²", "π", "⌫"),
+private val operators = setOf("+", "−", "×", "÷", "^")
+
+/** Клавиатура обычного калькулятора: только базовые операции. */
+private val normalRows = listOf(
+    listOf("C", "(", ")", "⌫"),
     listOf("7", "8", "9", "÷"),
     listOf("4", "5", "6", "×"),
     listOf("1", "2", "3", "−"),
-    listOf("(", ")", ".", "+"),
-    listOf("%", "0", "="),
+    listOf("%", "0", ".", "+"),
+    listOf("="),
+)
+
+/** Клавиатура инженерного калькулятора: функции, корень, логарифмы, степень. */
+private val engineeringRows = listOf(
+    listOf("C", "(", ")", "⌫"),
+    listOf("sin", "cos", "tan", "√"),
+    listOf("ln", "log", "π", "^"),
+    listOf("7", "8", "9", "÷"),
+    listOf("4", "5", "6", "×"),
+    listOf("1", "2", "3", "−"),
+    listOf("%", "0", ".", "+"),
+    listOf("="),
 )
 
 /**
  * Основной экран калькулятора: дисплей и клавиатура.
  * Хранит текущее выражение, результат и флаг «уже вычислено».
+ *
+ * @param mode набор кнопок: обычный или инженерный.
+ * @param onEvaluated вызывается после успешного вычисления (для записи в историю).
  */
 @Composable
-fun CalculatorScreen(modifier: Modifier = Modifier) {
+fun CalculatorScreen(
+    mode: CalculatorMode = CalculatorMode.NORMAL,
+    onEvaluated: (expression: String, result: String) -> Unit = { _, _ -> },
+    modifier: Modifier = Modifier,
+) {
     // Текущее введённое выражение (то, что набирает пользователь).
     var expression by rememberSaveable { mutableStateOf("") }
     // Результат вычисления (показывается крупно, если evaluated = true).
@@ -196,12 +222,15 @@ fun CalculatorScreen(modifier: Modifier = Modifier) {
 
     /**
      * Вычисляет текущее выражение и показывает результат.
+     * При успехе сообщает пару «выражение — результат» наружу (в историю).
      * При ошибке очищает выражение и выводит сообщение об ошибке.
      */
     fun evaluate() {
         if (expression.isBlank()) return
         try {
-            result = CalculatorEngine.format(CalculatorEngine.evaluate(expression))
+            val formatted = CalculatorEngine.format(CalculatorEngine.evaluate(expression))
+            result = formatted
+            onEvaluated(expression, formatted)
         } catch (e: CalcException) {
             expression = ""
             result = e.message ?: "Ошибка"
@@ -223,12 +252,17 @@ fun CalculatorScreen(modifier: Modifier = Modifier) {
             label == "x²" -> appendSquare()
             label == "%" -> appendPercent()
             label == "√" -> appendFunction("√(")
-            label == "sin" || label == "cos" || label == "tan" -> appendFunction("$label(")
+            label == "sin" || label == "cos" || label == "tan" ||
+                label == "ln" || label == "log" -> appendFunction("$label(")
             label == "π" -> appendDigit("π")
             label in operators -> appendOperator(label)
             else -> appendDigit(label) // цифры
         }
     }
+
+    val rows = if (mode == CalculatorMode.ENGINEERING) engineeringRows else normalRows
+    // В инженерном режиме строк больше, поэтому кнопки ниже, чтобы всё влезло на экран.
+    val buttonHeight: Dp = if (mode == CalculatorMode.ENGINEERING) 54.dp else 60.dp
 
     Column(
         modifier = modifier
@@ -265,13 +299,14 @@ fun CalculatorScreen(modifier: Modifier = Modifier) {
 
         // Клавиатура
         Column(verticalArrangement = Arrangement.spacedBy(0.dp)) {
-            buttonRows.forEach { row ->
+            rows.forEach { row ->
                 Row(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     row.forEach { label ->
                         CalcButton(
                             label = label,
+                            height = buttonHeight,
                             modifier = Modifier.weight(if (label == "=") 2f else 1f),
                             onClick = { press(label) }
                         )
@@ -297,6 +332,7 @@ private fun bigFontSize(text: String): TextUnit = when {
 @Composable
 private fun CalcButton(
     label: String,
+    height: Dp,
     modifier: Modifier,
     onClick: () -> Unit,
 ) {
@@ -337,7 +373,7 @@ private fun CalcButton(
 
     Button(
         onClick = onClick,
-        modifier = modifier.height(62.dp),
+        modifier = modifier.height(height),
         shape = RoundedCornerShape(0.dp),
         colors = ButtonDefaults.buttonColors(
             containerColor = container,
@@ -361,5 +397,14 @@ private fun CalcButton(
 private fun CalculatorPreview() {
     KalkuleitorTheme {
         CalculatorScreen()
+    }
+}
+
+/** Превью инженерного режима для Android Studio. */
+@Preview(showBackground = true, widthDp = 411, heightDp = 891)
+@Composable
+private fun EngineeringPreview() {
+    KalkuleitorTheme {
+        CalculatorScreen(mode = CalculatorMode.ENGINEERING)
     }
 }
