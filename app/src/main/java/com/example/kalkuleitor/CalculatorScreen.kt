@@ -1,5 +1,6 @@
 package com.example.kalkuleitor
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -12,303 +13,103 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.kalkuleitor.CalculatorState.Companion.operators
+import com.example.kalkuleitor.ui.theme.CalcBackground
+import com.example.kalkuleitor.ui.theme.CalcKeyDark
+import com.example.kalkuleitor.ui.theme.CalcKeyLight
+import com.example.kalkuleitor.ui.theme.CalcKeyOrange
+import com.example.kalkuleitor.ui.theme.CalcTextMain
+import com.example.kalkuleitor.ui.theme.CalcTextOnLight
+import com.example.kalkuleitor.ui.theme.CalcTextSub
 import com.example.kalkuleitor.ui.theme.KalkuleitorTheme
 
-/** Режим калькулятора: обычный набор кнопок или инженерный с функциями. */
-enum class CalculatorMode(val title: String) {
-    NORMAL("Обычный"),
-    ENGINEERING("Инженерный"),
-}
-
-private val operators = setOf("+", "−", "×", "÷", "^")
-
-/** Клавиатура обычного калькулятора: только базовые операции. */
-private val normalRows = listOf(
-    listOf("C", "(", ")", "⌫"),
+// Раскладка кнопок — это визуальное решение, поэтому остаётся в UI-файле.
+private val buttonRows = listOf(
+    listOf("sin", "cos", "tan", "C"),
+    listOf("√", "x²", "π", "⌫"),
     listOf("7", "8", "9", "÷"),
     listOf("4", "5", "6", "×"),
     listOf("1", "2", "3", "−"),
-    listOf("%", "0", ".", "+"),
-    listOf("="),
+    listOf("(", ")", ".", "+"),
+    listOf("%", "0", "="),
 )
 
-/** Клавиатура инженерного калькулятора: функции, корень, логарифмы, степень. */
-private val engineeringRows = listOf(
-    listOf("C", "(", ")", "⌫"),
-    listOf("sin", "cos", "tan", "√"),
-    listOf("ln", "log", "π", "^"),
-    listOf("7", "8", "9", "÷"),
-    listOf("4", "5", "6", "×"),
-    listOf("1", "2", "3", "−"),
-    listOf("%", "0", ".", "+"),
-    listOf("="),
-)
+/** Зазор между кнопками. */
+private val Gap = 6.dp
+
+/** Высота прямоугольной кнопки — ширина задаётся весом внутри Row. */
+private val ButtonHeight = 62.dp
 
 /**
- * Основной экран калькулятора: дисплей и клавиатура.
- * Хранит текущее выражение, результат и флаг «уже вычислено».
- *
- * @param mode набор кнопок: обычный или инженерный.
- * @param onEvaluated вызывается после успешного вычисления (для записи в историю).
+ * Визуальная часть калькулятора.
+ * Ничего не считает сам — только рисует дисплей и кнопки,
+ * а нажатия отдаёт в [CalculatorState.press].
  */
 @Composable
-fun CalculatorScreen(
-    mode: CalculatorMode = CalculatorMode.NORMAL,
-    onEvaluated: (expression: String, result: String) -> Unit = { _, _ -> },
-    modifier: Modifier = Modifier,
-) {
-    // Текущее введённое выражение (то, что набирает пользователь).
-    var expression by rememberSaveable { mutableStateOf("") }
-    // Результат вычисления (показывается крупно, если evaluated = true).
-    var result by rememberSaveable { mutableStateOf("") }
-    // Флаг: последним действием было нажатие «=».
-    var evaluated by rememberSaveable { mutableStateOf(false) }
-
-    // Живой предпросмотр результата, пока пользователь вводит выражение.
-    val preview = if (!evaluated && expression.isNotBlank()) {
-        runCatching { CalculatorEngine.evaluate(expression) }
-            .getOrNull()
-            ?.let { "= " + CalculatorEngine.format(it) }
-            ?: ""
-    } else {
-        ""
-    }
-
-    // Верхняя (мелкая) строка дисплея: либо выражение после «=», либо предпросмотр.
-    val smallText = if (evaluated) expression else preview
-    // Крупная строка дисплея: результат после «=» или текущее выражение.
-    val bigText = if (evaluated) result else expression.ifBlank { "0" }
-
-    /** Полностью очищает состояние калькулятора. */
-    fun clearAll() {
-        expression = ""
-        result = ""
-        evaluated = false
-    }
-
-    /** Если было вычисление — сбрасывает состояние перед новым вводом. */
-    fun startFreshIfNeeded() {
-        if (evaluated) {
-            expression = ""
-            result = ""
-            evaluated = false
-        }
-    }
-
-    /** Добавляет цифру (или π) к текущему выражению. */
-    fun appendDigit(text: String) {
-        startFreshIfNeeded()
-        expression += text
-    }
-
-    /**
-     * Добавляет оператор с учётом контекста:
-     * — если только что был результат, продолжает от него;
-     * — заменяет предыдущий оператор, если нужно;
-     * — позволяет начать выражение со знака «−».
-     */
-    fun appendOperator(operator: String) {
-        if (evaluated) {
-            // Продолжаем считать от полученного результата.
-            expression = if (result.isNotEmpty() && result.first().isDigit()) result else ""
-            result = ""
-            evaluated = false
-        }
-        if (expression.isEmpty()) {
-            if (operator == "−") expression = "−" // разрешаем начать с минуса
-            return
-        }
-        when {
-            expression.last() in "+−×÷^" -> expression = expression.dropLast(1) + operator
-            expression.last() == '(' -> if (operator == "−") expression += operator
-            else -> expression += operator
-        }
-    }
-
-    /**
-     * Добавляет десятичную точку с защитой:
-     * — в пустом выражении даёт «0.»;
-     * — не даёт поставить две точки в одно число;
-     * — не ставит точку после π, «)», «%».
-     */
-    fun appendDecimal() {
-        startFreshIfNeeded()
-        when {
-            expression.isEmpty() -> expression = "0."
-            expression.last() in "+−×÷^(" -> expression += "0."
-            expression.last().isDigit() -> {
-                val currentNumber = expression.takeLastWhile { it.isDigit() || it == '.' }
-                if (!currentNumber.contains('.')) expression += "."
-            }
-            // после π, ), % дробная часть не нужна
-        }
-    }
-
-    /** Добавляет функцию/токен (например, «sin(», «√(») в выражение. */
-    fun appendFunction(token: String) {
-        startFreshIfNeeded()
-        expression += token
-    }
-
-    /**
-     * Добавляет скобку:
-     * — «(» ставит всегда;
-     * — «)» ставит только если есть незакрытая «(» и последний символ не оператор.
-     */
-    fun appendParenthesis(parenthesis: String) {
-        if (parenthesis == "(") {
-            startFreshIfNeeded()
-            expression += "("
-            return
-        }
-        val opened = expression.count { it == '(' } - expression.count { it == ')' }
-        if (opened > 0 && expression.isNotEmpty() &&
-            expression.last() !in "+−×÷^("
-        ) {
-            expression += ")"
-        }
-    }
-
-    /** Возводит в квадрат: дописывает «^2» к последнему операнду. */
-    fun appendSquare() {
-        if (evaluated) {
-            expression = if (result.firstOrNull()?.isDigit() == true) result else ""
-            result = ""
-            evaluated = false
-        }
-        if (expression.isNotEmpty() && expression.last() !in "+−×÷^(") {
-            expression += "^2"
-        }
-    }
-
-    /** Добавляет процент «%» к последнему операнду. */
-    fun appendPercent() {
-        startFreshIfNeeded()
-        if (expression.isNotEmpty() && expression.last() !in "+−×÷^(") {
-            expression += "%"
-        }
-    }
-
-    /**
-     * Удаление последнего символа:
-     * — после «=» стирает результат (возвращает к выражению);
-     * — иначе убирает один символ в конце выражения.
-     */
-    fun backspace() {
-        if (evaluated) {
-            evaluated = false
-            result = ""
-        } else {
-            expression = expression.dropLast(1)
-        }
-    }
-
-    /**
-     * Вычисляет текущее выражение и показывает результат.
-     * При успехе сообщает пару «выражение — результат» наружу (в историю).
-     * При ошибке очищает выражение и выводит сообщение об ошибке.
-     */
-    fun evaluate() {
-        if (expression.isBlank()) return
-        try {
-            val formatted = CalculatorEngine.format(CalculatorEngine.evaluate(expression))
-            result = formatted
-            onEvaluated(expression, formatted)
-        } catch (e: CalcException) {
-            expression = ""
-            result = e.message ?: "Ошибка"
-        } catch (e: Exception) {
-            expression = ""
-            result = "Ошибка"
-        }
-        evaluated = true
-    }
-
-    /** Маршрутизирует нажатие кнопки к соответствующему обработчику по её подписи. */
-    fun press(label: String) {
-        when {
-            label == "C" -> clearAll()
-            label == "⌫" -> backspace()
-            label == "=" -> evaluate()
-            label == "." -> appendDecimal()
-            label == "(" || label == ")" -> appendParenthesis(label)
-            label == "x²" -> appendSquare()
-            label == "%" -> appendPercent()
-            label == "√" -> appendFunction("√(")
-            label == "sin" || label == "cos" || label == "tan" ||
-                label == "ln" || label == "log" -> appendFunction("$label(")
-            label == "π" -> appendDigit("π")
-            label in operators -> appendOperator(label)
-            else -> appendDigit(label) // цифры
-        }
-    }
-
-    val rows = if (mode == CalculatorMode.ENGINEERING) engineeringRows else normalRows
-    // В инженерном режиме строк больше, поэтому кнопки ниже, чтобы всё влезло на экран.
-    val buttonHeight: Dp = if (mode == CalculatorMode.ENGINEERING) 54.dp else 60.dp
+fun CalculatorScreen(modifier: Modifier = Modifier) {
+    val state = rememberSaveable(saver = CalculatorState.Saver) { CalculatorState() }
 
     Column(
         modifier = modifier
             .fillMaxSize()
-            .padding(horizontal = 16.dp, vertical = 12.dp)
+            .background(CalcBackground)
+            .padding(horizontal = 10.dp, vertical = 8.dp)
     ) {
         // Дисплей
         Column(
             modifier = Modifier
                 .weight(1f)
-                .fillMaxWidth(),
+                .fillMaxWidth()
+                .padding(horizontal = 6.dp),
             verticalArrangement = Arrangement.Bottom,
             horizontalAlignment = Alignment.End
         ) {
             Text(
-                text = smallText,
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                text = state.smallText,
+                fontSize = 18.sp,
+                color = CalcTextSub,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(6.dp))
             Text(
-                text = bigText,
-                fontSize = bigFontSize(bigText),
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurface,
+                text = state.bigText,
+                fontSize = bigFontSize(state.bigText),
+                fontWeight = FontWeight.Light,
+                color = CalcTextMain,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
         }
 
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(10.dp))
 
-        // Клавиатура
-        Column(verticalArrangement = Arrangement.spacedBy(0.dp)) {
-            rows.forEach { row ->
+        // Клавиатура: прямоугольные кнопки — фиксированная высота, ширина через weight.
+        Column(verticalArrangement = Arrangement.spacedBy(Gap)) {
+            buttonRows.forEach { row ->
                 Row(
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(Gap)
                 ) {
                     row.forEach { label ->
                         CalcButton(
                             label = label,
-                            height = buttonHeight,
-                            modifier = Modifier.weight(if (label == "=") 2f else 1f),
-                            onClick = { press(label) }
+                            modifier = Modifier
+                                .weight(if (label == "=") 2f else 1f)
+                                .height(ButtonHeight),
+                            onClick = { state.press(label) }
                         )
                     }
                 }
@@ -317,7 +118,7 @@ fun CalculatorScreen(
     }
 }
 
-/** Подбирает размер шрифта для большого текста дисплея в зависимости от длины строки. */
+/** Размер шрифта крупного дисплея подбирается под длину текста. */
 private fun bigFontSize(text: String): TextUnit = when {
     text.length <= 9 -> 54.sp
     text.length <= 13 -> 44.sp
@@ -325,18 +126,13 @@ private fun bigFontSize(text: String): TextUnit = when {
     else -> 26.sp
 }
 
-/**
- * Одна кнопка калькулятора с цветовой схемой, зависящей от её типа
- * (цифра, оператор, «=», «C/⌫», функция).
- */
+/** Прямоугольная кнопка калькулятора в стиле iPhone. */
 @Composable
 private fun CalcButton(
     label: String,
-    height: Dp,
     modifier: Modifier,
     onClick: () -> Unit,
 ) {
-    val scheme = MaterialTheme.colorScheme
     val isDigit = label.length == 1 && label[0].isDigit()
 
     val container: Color
@@ -344,36 +140,29 @@ private fun CalcButton(
     val fontSize: TextUnit
 
     when {
-        label == "=" -> {
-            container = scheme.primary
-            content = scheme.onPrimary
-            fontSize = 28.sp
+        // Оранжевые: операторы и «=» — как правая колонка в iPhone.
+        label == "=" || label in operators -> {
+            container = CalcKeyOrange
+            content = CalcTextMain
+            fontSize = if (label == "=") 30.sp else 28.sp
         }
-        isDigit || label == "." -> {
-            container = scheme.surfaceVariant
-            content = scheme.onSurfaceVariant
-            fontSize = 24.sp
-        }
-        label in operators -> {
-            container = scheme.primaryContainer
-            content = scheme.onPrimaryContainer
-            fontSize = 26.sp
-        }
+        // Светло-серые: сброс и удаление — как AC в iPhone.
         label == "C" || label == "⌫" -> {
-            container = scheme.errorContainer
-            content = scheme.onErrorContainer
+            container = CalcKeyLight
+            content = CalcTextOnLight
             fontSize = 18.sp
         }
+        // Тёмно-серые: цифры, точка, функции, скобки, % — как цифровая клавиатура.
         else -> {
-            container = scheme.secondaryContainer
-            content = scheme.onSecondaryContainer
-            fontSize = 16.sp
+            container = CalcKeyDark
+            content = CalcTextMain
+            fontSize = if (isDigit || label == ".") 26.sp else 16.sp
         }
     }
 
     Button(
         onClick = onClick,
-        modifier = modifier.height(height),
+        modifier = modifier,
         shape = RoundedCornerShape(0.dp),
         colors = ButtonDefaults.buttonColors(
             containerColor = container,
@@ -397,14 +186,5 @@ private fun CalcButton(
 private fun CalculatorPreview() {
     KalkuleitorTheme {
         CalculatorScreen()
-    }
-}
-
-/** Превью инженерного режима для Android Studio. */
-@Preview(showBackground = true, widthDp = 411, heightDp = 891)
-@Composable
-private fun EngineeringPreview() {
-    KalkuleitorTheme {
-        CalculatorScreen(mode = CalculatorMode.ENGINEERING)
     }
 }

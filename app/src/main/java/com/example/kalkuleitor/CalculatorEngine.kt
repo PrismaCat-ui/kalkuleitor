@@ -208,9 +208,6 @@ private class Parser(private val input: String) {
             "cos" -> Math.cos(Math.toRadians(argument))
             "tan" -> Math.tan(Math.toRadians(argument))
             "sqrt" -> Math.sqrt(argument)
-            "ln" -> Math.log(argument)
-            "log" -> Math.log10(argument)
-            "lg" -> Math.log10(argument)
             else -> throw CalcException("Ошибка")
         }
     }
